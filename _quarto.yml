@@ -1,0 +1,12 @@
+project: 
+  type: manuscript
+  output-dir: docs
+
+manuscript:
+  article: article.qmd
+
+execute: 
+  cache: true
+  freeze: true
+
+engine: julia
