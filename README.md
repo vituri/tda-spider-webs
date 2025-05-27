@@ -3,8 +3,8 @@
 How to run the code:
 
 - Install juliaup
-- Install Julia 1.10 LTS via juliaup
-- Clone this repository
+- Run `juliaup add lts` to install Julia 1.10 LTS via juliaup
+- Clone this repository locally
 - Open it on VSCode with the Julia extension installed
 - Run `] activate .` on the Julia console. You'll see the REPL change to `(TDAweb) pkg> `
 - Run `] precompile` on the Julia console. It'll install all dependencies
