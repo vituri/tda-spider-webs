@@ -25,7 +25,7 @@ function plot_wing_with_pd(pd, image, sample, title)
     plot(
         plot_pd(pd, persistence = true)
         ,heatmap(image)
-        ,scatter(last.(sample), first.(sample))
+        ,plot_scatter(sample)
         ,layout = l
         ,plot_title = title
     )
@@ -35,4 +35,8 @@ function plot_heatmap(D, labels, title = "")
     xticks = ([1:size(D)[1];], labels)
 
     heatmap(D, xticks = xticks, yticks = xticks, title = title)
+end
+
+function plot_scatter(X)
+    scatter(last.(X), first.(X), markersize = 1)
 end

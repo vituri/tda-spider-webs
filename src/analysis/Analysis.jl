@@ -5,5 +5,6 @@ using ..TDAweb
 include("functions.jl");
 export pairwise_distance,
     plot_wing_with_pd, 
-    plot_heatmap;
+    plot_heatmap, 
+    plot_scatter;
 end

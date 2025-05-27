@@ -40,22 +40,47 @@ execute:
 
 # Analysis
 
+## Loading the images
+
 ```{julia}
 using TDAweb, TDAweb.Preprocessing, TDAweb.Analysis, TDAweb.TDA
-using Plots;
+using TidierFiles: list_files;
+using DataFrames
+using Images: mosaicview;
+using Plots: heatmap, plot
 ```
 
 ```{julia}
-file = "images/raw/ENDOSULFAN/Endo-1.jpg"
-img = load_web(file, blur = 2)
-A = image_to_array(img)
-X = image_to_r2(A, threshold = 0.1);
+files = list_files("images")
+species = map(files) do file
+  split(file, "/")[2]
+end
+imgs = load_web.(files, blur = 2)
+As = image_to_array.(imgs)
+Xs = image_to_r2.(As, threshold = 0.1);
 ```
 
 ```{julia}
-heatmap(A)
+df = DataFrame(File = files, Specie = species, Image = imgs);
+grps = groupby(df, :Specie) |> collect;
 ```
 
 ```{julia}
-scatter(last.(X), first.(X), markersize = 1)
+#| output: asis
+#| echo: false
+
+# for d ∈ groupby(df, :Specie)
+#   print("### $(d.Specie[1]) \n")
+#   mosaicview(d.Image, ncol = 3) |> display
+# end;
+```
+
+
+```{julia}
+for i ∈ [1, 6]
+  plot(
+    heatmap(As[i]),
+    plot_scatter(Xs[i])
+  ) |> display
+end;
 ```

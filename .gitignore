@@ -3,5 +3,4 @@
 _freeze/
 _manuscript/
 .cache/
-images/raw/*
-images/processed/*
+images/*
