@@ -34,22 +34,22 @@ engine: julia
 execute: 
   cache: true
   freeze: true
+  output: docs/
+
 ---
 
-# Aaaa
-
-## bbbb
+# Analysis
 
 ```{julia}
 using TDAweb, TDAweb.Preprocessing, TDAweb.Analysis, TDAweb.TDA
-using Plots
+using Plots;
 ```
 
 ```{julia}
 file = "images/raw/ENDOSULFAN/Endo-1.jpg"
 img = load_web(file, blur = 2)
 A = image_to_array(img)
-X = image_to_r2(A, threshold = 0.1)
+X = image_to_r2(A, threshold = 0.1);
 ```
 
 ```{julia}
