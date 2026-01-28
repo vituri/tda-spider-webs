@@ -19,4 +19,7 @@ export TDA;
 include("analysis/Analysis.jl");
 export Analysis;
 
+include("visualization/Visualization.jl");
+export Visualization;
+
 end # module TDAweb

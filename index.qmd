@@ -1,0 +1,748 @@
+---
+title: "Classifying drug-induced webs using Topological Data Analysis"
+author:
+  - name: Guilherme Vituri F. Pinto
+    orcid: 0000-0002-7813-8777
+    corresponding: true
+    email: vituri.vituri@gmail.com
+    roles:
+      - Investigation
+      - Project administration
+      - Software
+      - Visualization
+    affiliations:
+      - Unesp
+  - name: Telmo
+  - name: ??????
+keywords:
+  - Topological Data Analysis
+  - Persistent homology
+abstract: |
+  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc
+plain-language-summary: |
+  Earthquake data for the island of La Palma from the September 2021 eruption is found ...
+key-points:
+  - A web scraping script was developed to pull data from the Instituto Geogràphico Nacional into a machine-readable form for analysis
+  - Earthquake events on La Palma are consistent with the presence of both mantle and crustal reservoirs.
+date: last-modified
+bibliography: references.bib
+citation:
+  container-title: Earth and Space Science
+number-sections: true
+
+engine: julia
+execute:
+  cache: true
+  freeze: true
+
+---
+
+# Setup
+
+## Imports
+
+```{julia}
+# === TDAweb Modules ===
+using TDAweb
+using TDAweb.Preprocessing: load_web, image_to_array, image_to_r2
+using TDAweb.TDA: rips_pd, rich_stats, persistence_entropy,
+                  vectorize_diagram, pd_distance_matrix, loocv_knn_wasserstein
+using TDAweb.Analysis: mds_embedding, classification_report, knn_predict,
+                       cross_validate, test_group_differences, stats_to_matrix,
+                       cohens_d, pairwise_drug_comparison, feature_importance_permutation,
+                       plot_wing_with_pd
+using TDAweb.Visualization: plot_betti_curves_by_group, plot_distance_heatmap_sorted,
+                            plot_3d_scatter, plot_mds_2d, plot_avg_persistence_images,
+                            plot_confusion_matrix, plot_feature_importance,
+                            plot_feature_boxplot
+
+# === Data & Stats ===
+using DataFrames, DataFramesMeta
+using TidierFiles: list_files
+using StatsBase: median, mean, zscore, std
+using Distances: pairwise, Euclidean
+using MultivariateStats
+using PersistenceDiagrams: Wasserstein, Bottleneck
+
+# === Plotting ===
+import Plots as pt
+using Images: mosaicview
+```
+
+# Data Loading
+
+## Load Images
+
+```{julia}
+files = list_files("images")
+species = map(files) do file
+    split(file, "/")[2]
+end
+
+imgs = load_web.(files, blur = 2)
+As = image_to_array.(imgs)
+Xs = image_to_r2.(As, threshold = 0.1);
+```
+
+```{julia}
+df = DataFrame(File = files, Specie = species, Image = imgs)
+unique_species = unique(species)
+println("Groups: ", unique_species)
+println("Samples per group:")
+for sp in unique_species
+    n = count(==(sp), species)
+    println("  $sp: $n")
+end
+```
+
+## Point Cloud Sampling
+
+```{julia}
+#| echo: false
+samples = map(Xs) do X
+    farthest_points_sample(X, 1000)
+end;
+```
+
+# Persistence Diagrams
+
+## Compute Rips Filtration
+
+```{julia}
+bcs = map(samples) do s
+    rips_pd(s, cutoff = 5)
+end;
+```
+
+## Extract H0 and H1
+
+```{julia}
+# H0: connected components (web fragmentation)
+# H1: loops/cycles (cells in web)
+# Ripserer returns tuple of (H0, H1, ...) diagrams
+
+# Safely extract diagrams - handle cases where diagrams might be empty or missing
+bcs_0 = [length(bc) >= 1 ? bc[1] : [] for bc in bcs]
+bcs_1 = [length(bc) >= 2 ? bc[2] : (length(bc) >= 1 ? bc[end] : []) for bc in bcs]
+
+println("Number of samples: ", length(bcs))
+println("H0 diagram example (first non-empty): ")
+for (i, bc) in enumerate(bcs_0)
+    if !isempty(bc)
+        println("  Sample $i: ", length(bc), " features")
+        break
+    end
+end
+println("H1 diagram example (first non-empty): ")
+for (i, bc) in enumerate(bcs_1)
+    if !isempty(bc)
+        println("  Sample $i: ", length(bc), " features")
+        break
+    end
+end;
+```
+
+## Representative Web Examples
+
+Before diving into feature extraction and statistics, let's visualize representative spider webs from each treatment group along with their persistence diagrams. Each panel shows:
+
+- **Top left**: Persistence diagram (birth-death plot showing H1 cycles)
+- **Top right**: Web image intensity heatmap
+- **Bottom**: Point cloud sample used for TDA computation
+
+```{julia}
+# Show one representative web per group (first sample from each)
+for sp in unique_species
+    idx = findfirst(==(sp), species)
+    if !isnothing(idx) && !isempty(bcs_1[idx])
+        p = plot_wing_with_pd(bcs_1[idx], As[idx], samples[idx], sp)
+        display(p)
+    end
+end
+```
+
+# Feature Extraction
+
+::: {.callout-tip}
+## Understanding TDA Features
+
+We extract several statistical summaries from each persistence diagram. Here's what each feature measures and how it relates to web structure:
+
+| Feature | What it measures | Web interpretation |
+|---------|------------------|-------------------|
+| **n_features** | Number of H1 cycles detected | Number of closed cells in the web |
+| **total_persistence** | Sum of all cycle lifespans | Overall topological complexity |
+| **mean_persistence** | Average cycle lifespan | Typical cell "robustness" |
+| **max_persistence** | Largest cycle lifespan | Most prominent hole or cell |
+| **entropy** | Uniformity of cycle lifespans | High = regular cells; Low = irregular cells |
+| **mean_birth** | Average scale at which cycles appear | Typical cell size |
+
+These features transform complex persistence diagrams into interpretable numbers that can be compared statistically across treatment groups.
+:::
+
+## Rich Statistics - H1 (Cycles)
+
+```{julia}
+stats_h1 = [rich_stats(bc) for bc in bcs_1]
+
+DataFrame(
+    Specie = species,
+    n_features = [s.n_features for s in stats_h1],
+    total_persistence = round.([s.total_persistence for s in stats_h1], digits=3),
+    mean_persistence = round.([s.mean_persistence for s in stats_h1], digits=3),
+    max_persistence = round.([s.max_persistence for s in stats_h1], digits=3),
+    entropy = round.([s.entropy for s in stats_h1], digits=3)
+)
+```
+
+## Rich Statistics - H0 (Fragmentation)
+
+```{julia}
+# H0 diagrams may be empty for some samples - handle gracefully
+stats_h0 = [rich_stats(bc) for bc in bcs_0]
+
+println("H0 Statistics (Web Fragmentation) - Mean by Group:")
+for sp in unique_species
+    idx = findall(==(sp), species)
+    if isempty(idx)
+        println("  $sp: no samples")
+        continue
+    end
+    group_h0 = stats_h0[idx]
+    components = [s.n_features for s in group_h0]
+    total_pers = [s.total_persistence for s in group_h0]
+    mean_components = isempty(components) ? 0.0 : mean(components)
+    mean_total_pers = isempty(total_pers) ? 0.0 : mean(total_pers)
+    println("  $sp: $(round(mean_components, digits=1)) components, total_pers=$(round(mean_total_pers, digits=3))")
+end;
+```
+
+## Feature Matrices
+
+```{julia}
+# H1 rich stats matrix
+X_h1, feature_names_h1 = stats_to_matrix(stats_h1)
+
+# H0 rich stats matrix
+X_h0, feature_names_h0 = stats_to_matrix(stats_h0)
+
+# Safe z-score normalization (handles constant columns)
+function safe_zscore(x)
+    s = std(x)
+    s == 0 ? zeros(length(x)) : zscore(x)
+end
+
+X_h1_normalized = mapslices(safe_zscore, X_h1, dims=1)
+X_h0_normalized = mapslices(safe_zscore, X_h0, dims=1)
+
+# Replace any NaN with 0
+X_h1_normalized[isnan.(X_h1_normalized)] .= 0.0
+X_h0_normalized[isnan.(X_h0_normalized)] .= 0.0
+
+println("H1 features: ", feature_names_h1)
+println("Feature matrix size: $(size(X_h1))")
+```
+
+## Vectorized Diagram Features
+
+```{julia}
+# Full vectorization (persistence images, Betti curves, landscapes, etc.)
+feature_vectors = [vectorize_diagram(bc) for bc in bcs_1]
+X_features = reduce(hcat, feature_vectors)'
+
+println("Vectorized features dimension: $(size(X_features, 2))")
+```
+
+# Exploratory Visualization
+
+## Summary Statistics by Drug
+
+```{julia}
+println("Mean Statistics by Group:\n")
+for sp in unique_species
+    idx = findall(==(sp), species)
+    if isempty(idx)
+        println("$sp: no samples\n")
+        continue
+    end
+    group_stats = stats_h1[idx]
+
+    entropies = [s.entropy for s in group_stats]
+    n_feats = [s.n_features for s in group_stats]
+    max_pers = [s.max_persistence for s in group_stats]
+
+    mean_entropy = isempty(entropies) ? 0.0 : mean(entropies)
+    mean_n_features = isempty(n_feats) ? 0.0 : mean(n_feats)
+    mean_max_pers = isempty(max_pers) ? 0.0 : mean(max_pers)
+
+    println("$sp:")
+    println("  - Mean cycles (H1): $(round(mean_n_features, digits=1))")
+    println("  - Mean entropy: $(round(mean_entropy, digits=3))")
+    println("  - Mean max persistence: $(round(mean_max_pers, digits=3))")
+    println()
+end
+```
+
+## Betti Curves by Drug
+
+```{julia}
+plot_betti_curves_by_group(bcs_1, species)
+```
+
+## Average Persistence Images
+
+```{julia}
+plot_avg_persistence_images(bcs_1, species; size_pi=8, sigma=0.15)
+```
+
+## Within-Group Variability
+
+Some drug groups show more heterogeneity in web structure than others. Below we show the most and least complex webs (by entropy) within each group to illustrate this variability. High entropy indicates regular, uniform cell sizes; low entropy indicates irregular cells.
+
+```{julia}
+for sp in unique_species
+    idx = findall(==(sp), species)
+    if length(idx) >= 2
+        group_entropies = [stats_h1[i].entropy for i in idx]
+        sorted_idx = idx[sortperm(group_entropies)]
+
+        low_i = sorted_idx[1]
+        high_i = sorted_idx[end]
+
+        p_low = plot_wing_with_pd(bcs_1[low_i], As[low_i], samples[low_i],
+                                   "$sp - Low entropy (irregular)")
+        p_high = plot_wing_with_pd(bcs_1[high_i], As[high_i], samples[high_i],
+                                    "$sp - High entropy (regular)")
+
+        combined = pt.plot(p_low, p_high, layout=(1, 2), size=(1200, 400))
+        display(combined)
+    end
+end
+```
+
+## Feature Distributions by Group
+
+The boxplots below show how key TDA features are distributed across treatment groups. This helps visualize group differences before formal statistical testing.
+
+```{julia}
+#| eval: false
+#| label: fig-boxplots
+#| fig-cap: "Distribution of key TDA features across treatment groups"
+
+p1 = plot_feature_boxplot([s.entropy for s in stats_h1], species, "Entropy (H1)")
+p2 = plot_feature_boxplot([s.n_features for s in stats_h1], species, "Number of Cycles (H1)")
+p3 = plot_feature_boxplot([s.max_persistence for s in stats_h1], species, "Max Persistence (H1)")
+p4 = plot_feature_boxplot([s.total_persistence for s in stats_h1], species, "Total Persistence (H1)")
+
+pt.plot(p1, p2, p3, p4, layout=(2, 2), size=(900, 700))
+```
+
+# Distance Analysis
+
+::: {.callout-note collapse="true"}
+## Understanding Wasserstein Distance
+
+The **Wasserstein distance** (also called Earth Mover's Distance) measures how different two persistence diagrams are.
+
+**Intuition**: Imagine each point in a persistence diagram as a pile of dirt. The Wasserstein distance is the minimum "work" needed to transform one diagram into another by moving dirt around.
+
+**Why use it for TDA?**
+
+- Specifically designed for comparing persistence diagrams
+- Captures both the locations of topological features and how they should be matched
+- Has metric properties, enabling use with standard machine learning methods (like KNN)
+
+**Notation**: Wasserstein(p, q) — we use p=1 (sum of movements) and q=2 (Euclidean ground metric).
+
+A **small** Wasserstein distance means two webs have similar topological structure; a **large** distance means their persistence diagrams differ substantially.
+:::
+
+::: {.callout-note collapse="true"}
+## Understanding MDS (Multidimensional Scaling)
+
+**MDS** converts a distance matrix into low-dimensional coordinates for visualization:
+
+1. Start with pairwise distances between all samples
+2. Find 2D or 3D coordinates that preserve these distances as well as possible
+3. Plot the coordinates — samples close together have similar features
+
+**How to interpret MDS plots:**
+
+- **Clusters** = groups of samples with similar topological features
+- **Separation between clusters** = distinct TDA signatures between groups
+- **Overlap between groups** = ambiguity; these groups are hard to distinguish topologically
+
+MDS is purely for visualization — it doesn't make statistical claims, but helps us see patterns before formal testing.
+:::
+
+## Wasserstein Distance Matrix
+
+```{julia}
+D_wasserstein = pd_distance_matrix(bcs_1; metric=Wasserstein(1, 2))
+```
+
+```{julia}
+plot_distance_heatmap_sorted(D_wasserstein, species; title="Wasserstein Distance (H1)")
+```
+
+## Euclidean Distance on Rich Stats
+
+```{julia}
+D_rich_stats = pairwise(Euclidean(), X_h1_normalized, dims=1)
+plot_distance_heatmap_sorted(D_rich_stats, species; title="Euclidean Distance (Rich Stats)")
+```
+
+## MDS Embeddings
+
+```{julia}
+# 2D MDS - Wasserstein
+mds_wass_2d = mds_embedding(D_wasserstein; maxoutdim=2)
+plot_mds_2d(mds_wass_2d.embedding, species; title="MDS 2D (Wasserstein)")
+```
+
+```{julia}
+# 2D MDS - Rich Stats
+mds_rich_2d = mds_embedding(D_rich_stats; maxoutdim=2)
+plot_mds_2d(mds_rich_2d.embedding, species; title="MDS 2D (Rich Stats)")
+```
+
+```{julia}
+#| eval: false
+# 3D MDS - Wasserstein (disabled: PlotlyJS output not compatible with Quarto)
+mds_wass_3d = mds_embedding(D_wasserstein; maxoutdim=3)
+plot_3d_scatter(mds_wass_3d.embedding, species; title="MDS 3D (Wasserstein H1)")
+```
+
+# Statistical Tests
+
+Our statistical analysis follows a three-stage approach:
+
+1. **Omnibus test** (Kruskal-Wallis): Do ANY groups differ from each other?
+2. **Pairwise comparisons** (Permutation tests): WHICH drugs differ from control?
+3. **Effect sizes** (Cohen's d): HOW MUCH do they differ?
+
+This hierarchical approach controls false positives while providing interpretable effect magnitudes.
+
+::: {.callout-note collapse="true"}
+## What is the Kruskal-Wallis Test?
+
+The **Kruskal-Wallis test** is a non-parametric alternative to one-way ANOVA. We use it here because:
+
+1. **No normality assumption**: Unlike ANOVA, it doesn't require the data to follow a normal distribution — important for TDA features which may have unusual distributions
+2. **Robust to outliers**: Uses ranks instead of raw values, so extreme points don't dominate
+3. **Works with small samples**: Reliable even with limited data per group
+
+**How to interpret the p-value:**
+
+- **p < 0.05**: Strong evidence that at least one group differs from the others (marked with *)
+- **p ≥ 0.05**: Insufficient evidence to conclude groups differ
+
+**Why not use ANOVA?** With small sample sizes and potentially non-normal distributions (common in TDA features), Kruskal-Wallis is more reliable and makes fewer assumptions.
+:::
+
+## Kruskal-Wallis Tests
+
+```{julia}
+println("Kruskal-Wallis Tests for Group Differences:\n")
+
+# Test key features
+features_to_test = [
+    ("entropy", [s.entropy for s in stats_h1]),
+    ("n_features", [s.n_features for s in stats_h1]),
+    ("max_persistence", [s.max_persistence for s in stats_h1]),
+    ("total_persistence", [s.total_persistence for s in stats_h1]),
+]
+
+for (name, values) in features_to_test
+    kw = test_group_differences(values, species)
+    sig = kw.p_value < 0.05 ? "*" : ""
+    println("$name: p = $(round(kw.p_value, digits=4)) $sig")
+end
+```
+
+::: {.callout-note collapse="true"}
+## Understanding Effect Sizes (Cohen's d)
+
+A **p-value** tells you *if* groups differ statistically, but **effect size** tells you *how much* they differ in practical terms.
+
+**Cohen's d** measures the standardized difference between two group means:
+
+$$d = \frac{\bar{x}_1 - \bar{x}_2}{s_{pooled}}$$
+
+where $s_{pooled}$ is the pooled standard deviation of both groups.
+
+**Interpretation guidelines:**
+
+| |d| value | Effect Size | Practical Meaning |
+|-----------|-------------|------------------|
+| < 0.2 | Negligible | Groups nearly identical |
+| 0.2 – 0.5 | Small | Detectable but minor difference |
+| 0.5 – 0.8 | Medium | Noticeable practical difference |
+| > 0.8 | Large | Substantial, meaningful difference |
+
+**Why effect size matters:** With large samples, even tiny differences can be "statistically significant" (p < 0.05) but practically meaningless. Effect size helps distinguish meaningful differences from trivial ones.
+:::
+
+::: {.callout-note collapse="true"}
+## Understanding Permutation Tests
+
+A **permutation test** is a non-parametric method to compute p-values without assuming any particular distribution:
+
+1. Calculate the observed difference between groups (e.g., difference in mean entropy)
+2. Randomly shuffle group labels many times (e.g., 10,000 permutations)
+3. Recalculate the difference after each shuffle
+4. Count how often the shuffled difference exceeds the observed difference
+5. p-value = (count + 1) / (n_permutations + 1)
+
+**Advantages:**
+
+- No distributional assumptions — works for any data
+- Works with any test statistic
+- Provides exact p-values even for small samples
+- Intuitive interpretation: "how often would we see this difference by chance?"
+
+**Used here:** We compare each drug group to CONTROL using permutation tests to get reliable p-values.
+:::
+
+::: {.callout-warning}
+## A Note on Multiple Comparisons
+
+When we test multiple features across multiple drug groups, we increase the chance of **false positives**. With 4 drugs × 3 features = 12 tests at α = 0.05, we expect about 0.6 false positives by chance alone.
+
+**Recommendations for interpreting results:**
+
+- Focus on results with **p < 0.01** (more stringent threshold)
+- Prioritize findings with **large effect sizes** (|d| > 0.8)
+- Look for **consistent patterns** across related features (e.g., both entropy and n_cycles showing similar direction)
+
+Results that meet multiple criteria (low p-value AND large effect size AND consistent pattern) are most reliable.
+:::
+
+## Pairwise Drug Comparisons with Effect Sizes
+
+```{julia}
+# Compare each drug to CONTROL with effect sizes
+comparisons = vcat([
+    pairwise_drug_comparison([s.entropy for s in stats_h1], species; feature_name="entropy"),
+    pairwise_drug_comparison([s.n_features for s in stats_h1], species; feature_name="n_cycles"),
+    pairwise_drug_comparison([s.max_persistence for s in stats_h1], species; feature_name="max_persistence"),
+]...)
+
+# Show results
+select(comparisons, :drug, :feature, :diff_percent => (x -> round.(x, digits=1)) => :diff_pct,
+       :cohens_d => (x -> round.(x, digits=2)) => :cohens_d, :effect_size, :p_value)
+```
+
+```{julia}
+# Bonferroni correction for multiple comparisons
+n_tests = nrow(comparisons)
+bonf_alpha = 0.05 / n_tests
+println("Multiple comparison correction:")
+println("  Number of tests: $n_tests")
+println("  Bonferroni-corrected α = $(round(bonf_alpha, digits=4))")
+println("  Comparisons significant after correction: ", sum(comparisons.p_value .< bonf_alpha))
+```
+
+# Classification
+
+Beyond hypothesis testing, we can ask: **can we automatically identify which drug a spider was exposed to based on its web's topological features?** This is a classification task.
+
+::: {.callout-note collapse="true"}
+## What is KNN (K-Nearest Neighbors)?
+
+**KNN** is one of the simplest classification algorithms. To classify a new sample:
+
+1. Compute the distance from the new sample to all training samples
+2. Find the **k nearest neighbors** (k closest training samples)
+3. Assign the **majority class** among those neighbors
+
+**Key parameter: k** (number of neighbors)
+
+- **Small k** (e.g., k=1 or k=3): More sensitive to local patterns, but also to noise
+- **Large k** (e.g., k=10+): More robust, but may miss subtle differences
+
+We use **k=3** as a balanced choice that captures local structure without being overly sensitive to outliers.
+
+**Distance metric matters:** We test both Wasserstein distance (comparing persistence diagrams directly) and Euclidean distance (comparing extracted features).
+:::
+
+::: {.callout-note collapse="true"}
+## Why Cross-Validation? And What's LOOCV vs K-Fold?
+
+**The problem:** If we train and test on the same data, we get overly optimistic accuracy because the model has "seen" the answers. We need to estimate performance on *unseen* data.
+
+### Leave-One-Out Cross-Validation (LOOCV)
+
+1. Remove **one** sample from the dataset
+2. Train the model on the remaining n-1 samples
+3. Predict the class of the held-out sample
+4. Repeat for **every** sample
+5. Accuracy = proportion of correct predictions
+
+**Pros:** Uses maximum training data; deterministic (same result every time)
+**Cons:** Computationally expensive; can have high variance
+
+### K-Fold Cross-Validation
+
+1. Split data into **k equal folds** (e.g., k=5)
+2. For each fold: train on k-1 folds, test on the remaining fold
+3. Average accuracy across all folds
+
+**Pros:** Good balance of bias and variance; faster than LOOCV
+**Cons:** Results vary slightly depending on random split (we report mean ± std)
+
+### Interpreting Results
+
+- **LOOCV accuracy:** Single number, deterministic
+- **K-fold accuracy:** Reported as mean ± standard deviation
+- Higher accuracy = better classification; >50% for 5 classes means better than random guessing (20%)
+:::
+
+::: {.callout-note collapse="true"}
+## Understanding Classification Metrics
+
+Beyond overall accuracy, we report **per-class metrics**:
+
+| Metric | What it measures | Formula |
+|--------|------------------|---------|
+| **Precision** | Of samples predicted as class X, how many are truly X? | TP / (TP + FP) |
+| **Recall** | Of samples truly in class X, how many did we identify? | TP / (TP + FN) |
+| **F1 Score** | Harmonic mean of precision and recall | 2 × (P × R) / (P + R) |
+
+**Interpreting the confusion matrix:**
+
+- **Diagonal elements:** Correct predictions (true positives for each class)
+- **Off-diagonal elements:** Errors — reading row i, column j means "sample truly in class i was predicted as class j"
+- A perfect classifier has all counts on the diagonal
+:::
+
+## KNN with Wasserstein Distance (LOOCV)
+
+```{julia}
+result_knn_wass = loocv_knn_wasserstein(bcs_1, species; k=3)
+println("Accuracy (KNN Wasserstein k=3): $(round(result_knn_wass.accuracy * 100, digits=1))%")
+
+report_wass = classification_report(species, result_knn_wass.predictions)
+println("\nPer-class metrics:")
+for label in report_wass["labels"]
+    m = report_wass[string(label)]
+    println("  $label: precision=$(round(m.precision, digits=2)), recall=$(round(m.recall, digits=2)), f1=$(round(m.f1, digits=2))")
+end
+```
+
+```{julia}
+plot_confusion_matrix(species, result_knn_wass.predictions; title="KNN Wasserstein (k=3)")
+```
+
+## KNN on Vectorized Features (5-fold CV)
+
+```{julia}
+knn_clf = (Xt, yt, Xtest) -> knn_predict(Xt, yt, Xtest; k=3)
+cv_features = cross_validate(knn_clf, X_features, species; k=5)
+println("Accuracy (KNN vectorized, 5-fold): $(round(cv_features.mean * 100, digits=1))% +/- $(round(cv_features.std * 100, digits=1))%")
+```
+
+## KNN on Rich Stats (5-fold CV)
+
+```{julia}
+cv_rich = cross_validate(knn_clf, X_h1_normalized, species; k=5)
+println("Accuracy (KNN rich stats, 5-fold): $(round(cv_rich.mean * 100, digits=1))% +/- $(round(cv_rich.std * 100, digits=1))%")
+```
+
+## Classification Comparison
+
+```{julia}
+println("=== Classification Methods Comparison ===\n")
+println("1. KNN Wasserstein (k=3, LOOCV):        $(round(result_knn_wass.accuracy * 100, digits=1))%")
+println("2. KNN Vectorized Features (k=3, 5-fold): $(round(cv_features.mean * 100, digits=1))% +/- $(round(cv_features.std * 100, digits=1))%")
+println("3. KNN Rich Stats (k=3, 5-fold):         $(round(cv_rich.mean * 100, digits=1))% +/- $(round(cv_rich.std * 100, digits=1))%")
+```
+
+# Feature Importance
+
+```{julia}
+# Compute feature importance via permutation
+importances = feature_importance_permutation(knn_clf, X_h1_normalized, species; n_repeats=20)
+plot_feature_importance(importances, feature_names_h1; top_n=12, title="H1 Rich Stats Feature Importance")
+```
+
+```{julia}
+# Show importance values
+importance_df = DataFrame(
+    feature = feature_names_h1,
+    importance = round.(importances, digits=4)
+)
+sort(importance_df, :importance, rev=true)
+```
+
+# Biological Interpretation
+
+## Feature Meaning
+
+| Dimension | Web Structure | Interpretation |
+|-----------|---------------|----------------|
+| H0 (components) | Disconnected fragments | More H0 = broken/fragmented web |
+| H1 (loops/cycles) | Closed cells/meshes | More H1 = more closed cells |
+| Entropy H1 | Cell uniformity | High entropy = regular cells |
+| Max persistence H1 | Largest hole/gap | High = large gap in web |
+
+## Drug Effects Summary
+
+```{julia}
+# Compare each drug to control
+control_idx = findall(==("CONTROL"), species)
+if isempty(control_idx)
+    println("No CONTROL group found")
+else
+    control_stats = stats_h1[control_idx]
+    control_entropies = [s.entropy for s in control_stats]
+    control_h1_counts = [s.n_features for s in control_stats]
+    control_mean_entropy = isempty(control_entropies) ? 0.0 : mean(control_entropies)
+    control_mean_h1 = isempty(control_h1_counts) ? 0.0 : mean(control_h1_counts)
+
+    println("Drug Effects Compared to CONTROL:\n")
+    println("CONTROL baseline - Entropy: $(round(control_mean_entropy, digits=3)), H1 count: $(round(control_mean_h1, digits=1))\n")
+
+    for sp in unique_species
+        sp == "CONTROL" && continue
+
+        idx = findall(==(sp), species)
+        if isempty(idx)
+            println("$sp: no samples\n")
+            continue
+        end
+        drug_stats = stats_h1[idx]
+
+        drug_entropies = [s.entropy for s in drug_stats]
+        drug_h1_counts = [s.n_features for s in drug_stats]
+        drug_entropy = isempty(drug_entropies) ? 0.0 : mean(drug_entropies)
+        drug_h1 = isempty(drug_h1_counts) ? 0.0 : mean(drug_h1_counts)
+
+        effects = String[]
+
+        if drug_h1 < control_mean_h1 * 0.8
+            push!(effects, "Fewer closed cells")
+        elseif drug_h1 > control_mean_h1 * 1.2
+            push!(effects, "More cells than control")
+        end
+
+        if drug_entropy < control_mean_entropy * 0.9
+            push!(effects, "More irregular cells")
+        elseif drug_entropy > control_mean_entropy * 1.1
+            push!(effects, "More regular cells")
+        end
+
+        effect_str = isempty(effects) ? "Similar to control" : join(effects, ", ")
+
+        # Safe division (avoid div by zero)
+        ent_pct = control_mean_entropy == 0 ? 0.0 : (drug_entropy/control_mean_entropy - 1)*100
+        h1_pct = control_mean_h1 == 0 ? 0.0 : (drug_h1/control_mean_h1 - 1)*100
+
+        println("$sp:")
+        println("  Entropy: $(round(drug_entropy, digits=3)) ($(round(ent_pct, digits=1))%)")
+        println("  H1 count: $(round(drug_h1, digits=1)) ($(round(h1_pct, digits=1))%)")
+        println("  Effect: $effect_str")
+        println()
+    end
+end
+```
