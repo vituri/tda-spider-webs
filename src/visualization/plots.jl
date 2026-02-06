@@ -292,3 +292,209 @@ function plot_feature_importance(importances::Vector, feature_names;
         size=(500, 300 + 20 * length(top_idx_rev))
     )
 end
+
+# ============================================================================
+# NEW VISUALIZATION FUNCTIONS FOR SEPARABILITY ANALYSIS
+# ============================================================================
+
+"""
+    plot_alpha_optimization(alpha_results; title="Distance Combination Optimization")
+
+Plot accuracy vs alpha for distance combination optimization.
+"""
+function plot_alpha_optimization(alpha_results; title::String="Distance Combination Optimization")
+    alphas = [r.alpha for r in alpha_results.all_results]
+    accs = [r.accuracy * 100 for r in alpha_results.all_results]
+
+    p = Plots.plot(alphas, accs,
+             xlabel="Alpha (Wasserstein weight)",
+             ylabel="LOOCV Accuracy (%)",
+             title=title,
+             legend=:bottomleft,
+             linewidth=2,
+             marker=:circle,
+             markersize=5,
+             color=:steelblue,
+             label="Accuracy",
+             size=(600, 400))
+
+    # Mark best point
+    best_alpha = alpha_results.best.alpha
+    best_acc = alpha_results.best.accuracy * 100
+    Plots.scatter!(p, [best_alpha], [best_acc],
+             color=:red, markersize=10,
+             label="Best: α=$(best_alpha), $(round(best_acc, digits=1))%")
+
+    # Add vertical line at best alpha
+    Plots.vline!(p, [best_alpha], linestyle=:dash, color=:red, alpha=0.5, label="")
+
+    p
+end
+
+"""
+    plot_roc_curve(roc_result; title="ROC Curve")
+
+Plot ROC curve with AUC annotation.
+"""
+function plot_roc_curve(roc_result; title::String="ROC Curve: Control Detection")
+    p = Plots.plot(roc_result.fpr, roc_result.tpr,
+             xlabel="False Positive Rate",
+             ylabel="True Positive Rate",
+             title=title * " (AUC = $(round(roc_result.auc, digits=3)))",
+             legend=:bottomright,
+             linewidth=2,
+             color=:blue,
+             label="ROC curve",
+             size=(500, 450))
+
+    # Add diagonal reference line (random classifier)
+    Plots.plot!(p, [0, 1], [0, 1],
+          linestyle=:dash,
+          color=:gray,
+          label="Random (AUC = 0.5)")
+
+    # Shade area under curve
+    Plots.plot!(p, roc_result.fpr, roc_result.tpr,
+          fillrange=0,
+          fillalpha=0.2,
+          fillcolor=:blue,
+          label="")
+
+    p
+end
+
+"""
+    plot_separability_comparison(results_dict; title="Class Separability Comparison")
+
+Bar chart comparing within/between distance ratios for different groupings.
+results_dict should have keys like "5-class", "Binary", "Drugs only" with ratio values.
+"""
+function plot_separability_comparison(labels_list::Vector{String}, ratios::Vector{Float64};
+                                       title::String="Class Separability Comparison")
+    colors = [:steelblue, :green, :orange, :red, :purple]
+
+    p = Plots.bar(labels_list, ratios,
+        ylabel="Within/Between Distance Ratio",
+        title=title * "\n(Lower = Better Separation)",
+        legend=false,
+        color=colors[1:length(labels_list)],
+        alpha=0.8,
+        size=(500, 400),
+        xrotation=15)
+
+    # Add horizontal reference line at 0.8 (overlap threshold)
+    Plots.hline!(p, [0.8], linestyle=:dash, color=:red, alpha=0.7,
+           label="Overlap threshold")
+
+    # Add horizontal reference line at 0.5 (good separation)
+    Plots.hline!(p, [0.5], linestyle=:dash, color=:green, alpha=0.7,
+           label="Good separation")
+
+    p
+end
+
+"""
+    plot_silhouette_by_class(silhouette_result; title="Silhouette Scores by Class")
+
+Bar chart of mean silhouette scores for each class.
+"""
+function plot_silhouette_by_class(silhouette_result; title::String="Silhouette Scores by Class")
+    class_names = collect(keys(silhouette_result.by_class))
+    scores = [silhouette_result.by_class[c].mean for c in class_names]
+
+    # Sort by score descending
+    sorted_idx = sortperm(scores, rev=true)
+    class_names = class_names[sorted_idx]
+    scores = scores[sorted_idx]
+
+    colors = [get(DRUG_COLORS, c, :gray) for c in class_names]
+
+    p = Plots.bar(class_names, scores,
+        ylabel="Mean Silhouette Score",
+        title=title,
+        legend=false,
+        color=colors,
+        alpha=0.8,
+        size=(500, 400))
+
+    # Add reference lines
+    Plots.hline!(p, [0.5], linestyle=:dash, color=:green, alpha=0.7,
+           label="Good (>0.5)")
+    Plots.hline!(p, [0.25], linestyle=:dash, color=:orange, alpha=0.7,
+           label="Weak (0.25)")
+    Plots.hline!(p, [0.0], linestyle=:solid, color=:red, alpha=0.5,
+           label="Poor (<0)")
+
+    # Add overall mean as text
+    overall = silhouette_result.overall_mean
+    Plots.annotate!(p, [(length(class_names)/2, maximum(scores) + 0.05,
+                   Plots.text("Overall: $(round(overall, digits=3))", 10, :black))])
+
+    p
+end
+
+"""
+    plot_binary_classification_summary(binary_result; title="Binary Classification: Control vs Drug")
+
+Summary plot showing accuracy with confidence interval.
+"""
+function plot_binary_classification_summary(binary_result; title::String="Binary Classification")
+    metrics = ["Accuracy", "Sensitivity", "Specificity"]
+    values = [binary_result.accuracy, binary_result.sensitivity, binary_result.specificity]
+
+    p = Plots.bar(metrics, values .* 100,
+        ylabel="Percentage (%)",
+        title=title,
+        legend=false,
+        color=[:steelblue, :green, :orange],
+        alpha=0.8,
+        ylims=(0, 105),
+        size=(400, 350))
+
+    # Add CI error bar for accuracy
+    ci_lower = binary_result.ci_lower * 100
+    ci_upper = binary_result.ci_upper * 100
+    acc_val = binary_result.accuracy * 100
+
+    Plots.plot!(p, [1, 1], [ci_lower, ci_upper],
+          linewidth=3, color=:black, label="")
+    Plots.scatter!(p, [1, 1], [ci_lower, ci_upper],
+             color=:black, markersize=6, label="")
+
+    # Add text annotations
+    for (i, v) in enumerate(values)
+        Plots.annotate!(p, [(i, v * 100 + 3,
+                       Plots.text("$(round(v * 100, digits=1))%", 9, :black))])
+    end
+
+    p
+end
+
+"""
+    plot_pairwise_group_heatmap(pairwise_df; title="Pairwise Group Distances")
+
+Heatmap showing mean distances between all group pairs.
+"""
+function plot_pairwise_group_heatmap(pairwise_df; title::String="Pairwise Group Distances")
+    unique_groups = sort(unique(vcat(pairwise_df.group1, pairwise_df.group2)))
+    n = length(unique_groups)
+    D_groups = zeros(n, n)
+
+    group_to_idx = Dict(g => i for (i, g) in enumerate(unique_groups))
+
+    for row in eachrow(pairwise_df)
+        i, j = group_to_idx[row.group1], group_to_idx[row.group2]
+        D_groups[i, j] = row.mean_distance
+        D_groups[j, i] = row.mean_distance
+    end
+
+    Plots.heatmap(D_groups,
+            xticks=(1:n, string.(unique_groups)),
+            yticks=(1:n, string.(unique_groups)),
+            title=title,
+            colorbar_title="Mean Distance",
+            xrotation=45,
+            color=:viridis,
+            aspect_ratio=:equal,
+            size=(500, 450))
+end

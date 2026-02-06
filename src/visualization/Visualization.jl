@@ -11,8 +11,14 @@ export DRUG_COLORS,
     plot_feature_boxplot,
     plot_stats_comparison,
     plot_mds_2d,
-    # New exports
     plot_confusion_matrix,
-    plot_feature_importance
+    plot_feature_importance,
+    # Separability analysis plots
+    plot_alpha_optimization,
+    plot_roc_curve,
+    plot_separability_comparison,
+    plot_silhouette_by_class,
+    plot_binary_classification_summary,
+    plot_pairwise_group_heatmap
 
 end

@@ -18,7 +18,7 @@ keywords:
   - Topological Data Analysis
   - Persistent homology
 abstract: |
-  We studied etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc  etc etc etc
+  We studied etc etc etc
 plain-language-summary: |
   Earthquake data for the island of La Palma from the September 2021 eruption is found ...
 key-points:
@@ -50,11 +50,24 @@ using TDAweb.TDA: rips_pd, rich_stats, persistence_entropy,
 using TDAweb.Analysis: mds_embedding, classification_report, knn_predict,
                        cross_validate, test_group_differences, stats_to_matrix,
                        cohens_d, pairwise_drug_comparison, feature_importance_permutation,
-                       plot_wing_with_pd
+                       plot_wing_with_pd,
+                       # Distance combination
+                       combine_distances, loocv_knn_distance, optimize_alpha,
+                       # Binary classification
+                       binary_classification_control_vs_rest, roc_curve_control,
+                       # Separability metrics
+                       within_between_ratio, silhouette_by_class, pairwise_group_distances,
+                       # PERMANOVA
+                       permanova, permanova_control_vs_drugs, drug_equivalence_test,
+                       pairwise_drug_permutation_tests, pairwise_confusion_analysis
 using TDAweb.Visualization: plot_betti_curves_by_group, plot_distance_heatmap_sorted,
                             plot_3d_scatter, plot_mds_2d, plot_avg_persistence_images,
                             plot_confusion_matrix, plot_feature_importance,
-                            plot_feature_boxplot
+                            plot_feature_boxplot,
+                            # New plots
+                            plot_alpha_optimization, plot_roc_curve,
+                            plot_separability_comparison, plot_silhouette_by_class,
+                            plot_binary_classification_summary, plot_pairwise_group_heatmap
 
 # === Data & Stats ===
 using DataFrames, DataFramesMeta
@@ -97,8 +110,9 @@ end
 
 ## Point Cloud Sampling
 
+We extract 1000 points from each web
+
 ```{julia}
-#| echo: false
 samples = map(Xs) do X
     farthest_points_sample(X, 1000)
 end;
@@ -745,4 +759,236 @@ else
         println()
     end
 end
+```
+
+# Enhanced Separability Analysis
+
+This section provides rigorous statistical evidence for two key hypotheses:
+
+1. **CONTROL is clearly separable** from all drug-treated groups
+2. **Drug classes are NOT easily separable** from each other
+
+## Distance Combination
+
+We combine Wasserstein distance (topological structure) with Euclidean distance (rich statistics features) to potentially improve classification.
+
+```{julia}
+# Optimize combination of Wasserstein and Euclidean distances
+alpha_results = optimize_alpha(D_wasserstein, D_rich_stats, species;
+                               alpha_range=0.0:0.05:1.0, k=3)
+
+println("=== Distance Combination Optimization ===")
+println("Best alpha: $(alpha_results.best.alpha)")
+println("Best accuracy: $(round(alpha_results.best.accuracy * 100, digits=1))%")
+println("\nInterpretation:")
+println("  alpha = 1.0 means pure Wasserstein distance")
+println("  alpha = 0.0 means pure Euclidean (rich stats) distance")
+```
+
+```{julia}
+plot_alpha_optimization(alpha_results)
+```
+
+```{julia}
+# Create combined distance matrix with optimal alpha
+D_combined = combine_distances(D_wasserstein, D_rich_stats; alpha=alpha_results.best.alpha)
+
+# Compare with individual distances
+acc_wass = loocv_knn_distance(D_wasserstein, species; k=3)
+acc_eucl = loocv_knn_distance(D_rich_stats, species; k=3)
+acc_combined = loocv_knn_distance(D_combined, species; k=3)
+
+println("=== Classification Accuracy Comparison ===")
+println("Wasserstein only:  $(round(acc_wass * 100, digits=1))%")
+println("Euclidean only:    $(round(acc_eucl * 100, digits=1))%")
+println("Combined (α=$(alpha_results.best.alpha)): $(round(acc_combined * 100, digits=1))%")
+```
+
+## Binary Classification: Control vs Drug
+
+Collapsing all drugs into a single "DRUG" class tests whether CONTROL can be clearly distinguished from treated webs.
+
+```{julia}
+binary_result = binary_classification_control_vs_rest(X_h1_normalized, species; k=3)
+
+println("=== Binary Classification: CONTROL vs DRUG ===")
+println("Accuracy: $(round(binary_result.accuracy * 100, digits=1))%")
+println("95% CI: [$(round(binary_result.ci_lower * 100, digits=1))%, $(round(binary_result.ci_upper * 100, digits=1))%]")
+println("Sensitivity (Control recall): $(round(binary_result.sensitivity * 100, digits=1))%")
+println("Specificity (Drug recall): $(round(binary_result.specificity * 100, digits=1))%")
+```
+
+```{julia}
+plot_binary_classification_summary(binary_result; title="Control vs Drug Classification")
+```
+
+### ROC Curve Analysis
+
+The ROC curve shows how well we can detect CONTROL samples using distance to the Control centroid.
+
+```{julia}
+roc_result = roc_curve_control(X_h1_normalized, species)
+println("ROC AUC: $(round(roc_result.auc, digits=3))")
+println("\nInterpretation:")
+println("  AUC > 0.9: Excellent discrimination")
+println("  AUC 0.8-0.9: Good discrimination")
+println("  AUC 0.7-0.8: Fair discrimination")
+```
+
+```{julia}
+plot_roc_curve(roc_result)
+```
+
+## Separability Metrics
+
+### Within-Class vs Between-Class Distance Ratios
+
+A lower ratio indicates better class separation. Ratios above 0.8 suggest overlapping classes.
+
+```{julia}
+# Full 5-class analysis
+wb_full = within_between_ratio(D_wasserstein, species)
+
+# Binary grouping (Control vs Drug)
+binary_labels = [l == "CONTROL" ? "CONTROL" : "DRUG" for l in species]
+wb_binary = within_between_ratio(D_wasserstein, binary_labels)
+
+# Drugs only (excluding Control)
+drug_idx = findall(!=("CONTROL"), species)
+wb_drugs = within_between_ratio(D_wasserstein[drug_idx, drug_idx], species[drug_idx])
+
+println("=== Within/Between Distance Ratios ===")
+println("Full 5-class:        $(round(wb_full.ratio, digits=3)) - $(wb_full.interpretation)")
+println("Binary (Ctrl/Drug):  $(round(wb_binary.ratio, digits=3)) - $(wb_binary.interpretation)")
+println("Drugs only (4-class): $(round(wb_drugs.ratio, digits=3)) - $(wb_drugs.interpretation)")
+```
+
+```{julia}
+plot_separability_comparison(
+    ["5-class\n(all groups)", "Binary\n(Ctrl vs Drug)", "4-class\n(drugs only)"],
+    [wb_full.ratio, wb_binary.ratio, wb_drugs.ratio];
+    title="Class Separability"
+)
+```
+
+### Silhouette Score Analysis
+
+Silhouette scores measure how well-defined each cluster is. Higher is better:
+- \> 0.5: Good separation
+- 0.25-0.5: Weak separation
+- \< 0.25: Poor separation (overlapping)
+
+```{julia}
+sil_result = silhouette_by_class(D_wasserstein, species)
+
+println("=== Silhouette Scores by Class ===")
+println("Overall mean: $(round(sil_result.overall_mean, digits=3))")
+println()
+for (class, stats) in sil_result.by_class
+    interp = stats.mean > 0.5 ? "good" : stats.mean > 0.25 ? "weak" : "poor"
+    println("$class: $(round(stats.mean, digits=3)) ($interp)")
+end
+```
+
+```{julia}
+plot_silhouette_by_class(sil_result; title="Silhouette Scores by Class")
+```
+
+### Pairwise Group Distances
+
+```{julia}
+pairwise_dists = pairwise_group_distances(D_wasserstein, species)
+pairwise_dists
+```
+
+```{julia}
+plot_pairwise_group_heatmap(pairwise_dists; title="Mean Pairwise Wasserstein Distances")
+```
+
+## PERMANOVA Tests
+
+PERMANOVA tests whether group centroids differ significantly in multivariate space. It works directly on the Wasserstein distance matrix.
+
+### Control vs Drugs
+
+```{julia}
+permanova_ctrl = permanova_control_vs_drugs(D_wasserstein, species; n_permutations=9999)
+
+println("=== PERMANOVA: Control vs Drugs ===")
+println("Pseudo-F: $(round(permanova_ctrl.f_statistic, digits=2))")
+println("p-value: $(round(permanova_ctrl.p_value, digits=4))")
+println()
+if permanova_ctrl.p_value < 0.05
+    println("✓ CONTROL centroid significantly differs from DRUG centroid (p < 0.05)")
+else
+    println("✗ No significant difference detected")
+end
+```
+
+### Drug Equivalence Test
+
+Testing whether drug groups differ from each other (excluding CONTROL).
+
+```{julia}
+drug_equiv = drug_equivalence_test(D_wasserstein, species; n_permutations=9999)
+
+println("=== PERMANOVA: Among Drugs Only ===")
+println("Pseudo-F: $(round(drug_equiv.f_statistic, digits=2))")
+println("p-value: $(round(drug_equiv.p_value, digits=4))")
+println()
+println("Interpretation: $(drug_equiv.interpretation)")
+```
+
+### Pairwise Drug Comparisons
+
+Testing each pair of drugs to see if they can be statistically distinguished.
+
+```{julia}
+# Use entropy as a key feature
+drug_perm_tests = pairwise_drug_permutation_tests([s.entropy for s in stats_h1], species;
+                                                    n_permutations=10000)
+println("=== Pairwise Drug Permutation Tests (Entropy) ===")
+drug_perm_tests
+```
+
+## Confusion Analysis
+
+Which classes are most often confused with each other?
+
+```{julia}
+confusion_df = pairwise_confusion_analysis(species, result_knn_wass.predictions)
+
+println("=== Top Confusion Pairs ===")
+first(confusion_df, 10)
+```
+
+## Summary: Separability Evidence
+
+```{julia}
+println("=" ^ 60)
+println("SEPARABILITY ANALYSIS SUMMARY")
+println("=" ^ 60)
+
+println("\n### Evidence that CONTROL is SEPARABLE ###")
+println("Binary classification accuracy: $(round(binary_result.accuracy * 100, digits=1))%")
+println("ROC AUC: $(round(roc_result.auc, digits=3))")
+println("PERMANOVA (Ctrl vs Drugs) p-value: $(round(permanova_ctrl.p_value, digits=4))")
+println("Control silhouette score: $(round(sil_result.by_class["CONTROL"].mean, digits=3))")
+
+ctrl_separable = binary_result.accuracy > 0.85 && permanova_ctrl.p_value < 0.05
+println("\nConclusion: ", ctrl_separable ? "✓ CONTROL IS CLEARLY SEPARABLE" : "⚠ Evidence is weak")
+
+println("\n### Evidence that DRUGS are NOT separable ###")
+println("Drug-only PERMANOVA p-value: $(round(drug_equiv.p_value, digits=4))")
+println("Drugs-only within/between ratio: $(round(wb_drugs.ratio, digits=3))")
+
+# Get mean silhouette for drugs
+drug_sils = [sil_result.by_class[k].mean for k in keys(sil_result.by_class) if k != "CONTROL"]
+mean_drug_sil = mean(drug_sils)
+println("Mean drug silhouette: $(round(mean_drug_sil, digits=3))")
+
+drugs_not_separable = drug_equiv.p_value >= 0.05 || wb_drugs.ratio > 0.7
+println("\nConclusion: ", drugs_not_separable ? "✓ DRUGS ARE NOT EASILY SEPARABLE" : "⚠ Some drug differences detected")
+
+println("\n" * "=" ^ 60)
 ```
