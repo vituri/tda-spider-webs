@@ -1,1 +1,10 @@
-{}
+{
+    "chat.tools.terminal.autoApprove": {
+        "/home/vituri/Documents/Github/tda-spider-webs/.venv/bin/python": true,
+        "true": true,
+        "/^python3 -m pip install --user webio_jupyter_extension$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

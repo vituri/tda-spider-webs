@@ -1,8 +1,9 @@
 using StatsPlots  # StatsPlots re-exports Plots and adds boxplot, violin, etc.
-import PlotlyJS
 using PersistenceDiagrams
 using PersistenceDiagrams: PersistenceImage, BettiCurve
 using StatsBase: mean, std, countmap
+import PlotlyJS
+
 
 # Color palette for drug categories
 const DRUG_COLORS = Dict(

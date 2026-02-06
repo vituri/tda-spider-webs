@@ -1,7 +1,7 @@
 using PersistenceDiagrams
 using PersistenceDiagrams: PersistenceImage, BettiCurve, Landscape, Silhouette, Wasserstein, Bottleneck
 using Ripserer: persistence, birth, death
-using StatsBase: mean, std, quantile
+using StatsBase: mean, std, quantile, median
 
 # Persistence entropy calculation
 function persistence_entropy(persistences::Vector{<:Real})
@@ -25,7 +25,7 @@ function rich_stats(pd)
     empty_result = (
         n_features = 0,
         total_persistence = 0.0,
-        mean_persistence = 0.0,
+        median_persistence = 0.0,
         std_persistence = 0.0,
         max_persistence = 0.0,
         q25 = 0.0,
@@ -33,7 +33,7 @@ function rich_stats(pd)
         q75 = 0.0,
         q90 = 0.0,
         entropy = 0.0,
-        mean_birth = 0.0,
+        median_birth = 0.0,
         birth_range = 0.0,
     )
 
@@ -47,19 +47,21 @@ function rich_stats(pd)
         pers = persistence.(pd)
         births = birth.(pd)
 
-        # Filter to valid finite values
-        valid_pers = filter(isfinite, pers)
-        valid_births = filter(isfinite, births)
+        # Filter out infinite values (essential features)
+        finite_indices = findall(i -> isfinite(pers[i]) && isfinite(births[i]), 1:length(pers))
 
-        # If no valid values, return empty result
-        if isempty(valid_pers) || isempty(valid_births)
+        # If no finite values, return empty result
+        if isempty(finite_indices)
             return empty_result
         end
 
+        valid_pers = pers[finite_indices]
+        valid_births = births[finite_indices]
+
         (
-            n_features = length(pd),
+            n_features = length(finite_indices),  # Count only finite features
             total_persistence = sum(valid_pers),
-            mean_persistence = mean(valid_pers),
+            median_persistence = median(valid_pers),
             std_persistence = length(valid_pers) > 1 ? std(valid_pers) : 0.0,
             max_persistence = maximum(valid_pers),
             q25 = quantile(valid_pers, 0.25),
@@ -67,7 +69,7 @@ function rich_stats(pd)
             q75 = quantile(valid_pers, 0.75),
             q90 = quantile(valid_pers, 0.90),
             entropy = persistence_entropy(valid_pers),
-            mean_birth = mean(valid_births),
+            median_birth = median(valid_births),
             birth_range = maximum(valid_births) - minimum(valid_births),
         )
     catch

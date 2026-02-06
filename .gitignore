@@ -5,3 +5,7 @@ _manuscript/
 .cache/
 images/*
 drafts/
+.CondaPkg/
+.claude/
+.venv/
+.vscode/

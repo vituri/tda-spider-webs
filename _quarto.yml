@@ -9,4 +9,7 @@ execute:
   cache: true
   freeze: true
 
-engine: julia
+engine: jupyter
+
+jupyter:
+  kernel: julia-1.12.4-project-1.12

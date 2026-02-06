@@ -2,7 +2,7 @@
 
 julia_version = "1.12.4"
 manifest_format = "2.0"
-project_hash = "28e30b30dbc07dedaca58648839d3c894d76c334"
+project_hash = "8ee695179683026ecd6bcd57f2bf0f82f7747088"
 
 [[deps.ARFFFiles]]
 deps = ["CategoricalArrays", "Dates", "Parsers", "Tables"]
@@ -503,6 +503,12 @@ git-tree-sha1 = "d9d26935a0bcffc87d2613ce14c527c99fc543fd"
 uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
 version = "2.5.0"
 
+[[deps.Conda]]
+deps = ["Downloads", "JSON", "VersionParsing"]
+git-tree-sha1 = "8f06b0cfa4c514c7b9546756dbae91fcfbc92dc9"
+uuid = "8f4d0f93-b110-5947-807f-2305c1781a2d"
+version = "1.10.3"
+
 [[deps.CondaPkg]]
 deps = ["JSON3", "Markdown", "MicroMamba", "Pidfile", "Pkg", "Preferences", "Scratch", "TOML", "pixi_jll"]
 git-tree-sha1 = "bd491d55b97a036caae1d78729bdb70bf7dababc"
@@ -857,12 +863,10 @@ deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", 
 git-tree-sha1 = "ee0585b62671ce88e48d3409733230b401c9775c"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
 version = "0.73.22"
+weakdeps = ["IJulia"]
 
     [deps.GR.extensions]
     IJuliaExt = "IJulia"
-
-    [deps.GR.weakdeps]
-    IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
 
 [[deps.GR_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "FreeType2_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Qt6Base_jll", "Zlib_jll", "libpng_jll"]
@@ -973,6 +977,17 @@ deps = ["Combinatorics", "Distributions", "LinearAlgebra", "Printf", "Random", "
 git-tree-sha1 = "b67985bd11331ccef26109a6269dbaae01474a72"
 uuid = "09f84164-cd44-5f33-b23f-e6b0d136a0d5"
 version = "0.11.6"
+
+[[deps.IJulia]]
+deps = ["Base64", "Conda", "Dates", "InteractiveUtils", "Logging", "Markdown", "Pkg", "PrecompileTools", "Printf", "REPL", "Random", "SHA", "Sockets", "UUIDs", "ZMQ"]
+git-tree-sha1 = "dff8af3ab4f632d959ef19726b85939328ba289c"
+uuid = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
+version = "1.34.1"
+weakdeps = ["PythonCall", "Revise"]
+
+    [deps.IJulia.extensions]
+    IJuliaPythonCallExt = "PythonCall"
+    IJuliaReviseExt = "Revise"
 
 [[deps.IfElse]]
 git-tree-sha1 = "debdd00ffef04665ccbb3e150747a77560e8fad1"
@@ -2001,6 +2016,7 @@ deps = ["ColorSchemes", "Colors", "Dates", "DelimitedFiles", "DocStringExtension
 git-tree-sha1 = "6256ab3ee24ef079b3afa310593817e069925eeb"
 uuid = "a03496cd-edff-5a9b-9e67-9cda94a718b5"
 version = "0.8.23"
+weakdeps = ["DataFrames", "Distributions", "IJulia", "JSON3"]
 
     [deps.PlotlyBase.extensions]
     DataFramesExt = "DataFrames"
@@ -2008,29 +2024,18 @@ version = "0.8.23"
     IJuliaExt = "IJulia"
     JSON3Ext = "JSON3"
 
-    [deps.PlotlyBase.weakdeps]
-    DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
-    Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
-    IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
-    JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
-
 [[deps.PlotlyJS]]
 deps = ["Base64", "Blink", "DelimitedFiles", "JSExpr", "JSON", "Kaleido_jll", "Markdown", "Pkg", "PlotlyBase", "PlotlyKaleido", "REPL", "Reexport", "Requires", "WebIO"]
 git-tree-sha1 = "287e092914da6c91f002aafcf82a2ec065bf94a3"
 uuid = "f0f68f2c-4968-5e81-91da-67840de0976a"
 version = "0.18.17"
+weakdeps = ["CSV", "DataFrames", "IJulia", "JSON3"]
 
     [deps.PlotlyJS.extensions]
     CSVExt = "CSV"
     DataFramesExt = ["DataFrames", "CSV"]
     IJuliaExt = "IJulia"
     JSON3Ext = "JSON3"
-
-    [deps.PlotlyJS.weakdeps]
-    CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
-    DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
-    IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
-    JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 
 [[deps.PlotlyKaleido]]
 deps = ["Artifacts", "Base64", "JSON", "Kaleido_jll"]
@@ -2650,7 +2655,7 @@ uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
 version = "7.8.3+2"
 
 [[deps.TDAweb]]
-deps = ["Chain", "Clustering", "DataFrames", "DataFramesMeta", "Distances", "HypothesisTests", "ImageBinarization", "ImageFiltering", "ImageTransformations", "Images", "LinearAlgebra", "MLJ", "MLJDecisionTreeInterface", "MetricSpaces", "MultivariateStats", "NearestNeighborModels", "PersistenceDiagrams", "PlotlyJS", "Plots", "ProgressMeter", "PythonCall", "Random", "Reexport", "Revise", "Ripserer", "StatsBase", "StatsPlots", "TidierFiles"]
+deps = ["Chain", "Clustering", "DataFrames", "DataFramesMeta", "Distances", "HypothesisTests", "IJulia", "ImageBinarization", "ImageFiltering", "ImageTransformations", "Images", "LinearAlgebra", "MLJ", "MLJDecisionTreeInterface", "MetricSpaces", "MultivariateStats", "NearestNeighborModels", "PersistenceDiagrams", "PlotlyJS", "Plots", "ProgressMeter", "PythonCall", "Random", "Reexport", "Revise", "Ripserer", "StatsBase", "StatsPlots", "TidierFiles"]
 path = "."
 uuid = "33e9cfd9-3fd8-44a9-876f-d405e84153eb"
 version = "0.1.0"
@@ -2864,6 +2869,11 @@ git-tree-sha1 = "d1d9a935a26c475ebffd54e9c7ad11627c43ea85"
 uuid = "3d5dd08c-fd9d-11e8-17fa-ed2836048c2f"
 version = "0.21.72"
 
+[[deps.VersionParsing]]
+git-tree-sha1 = "58d6e80b4ee071f5efd07fda82cb9fbe17200868"
+uuid = "81def892-9a0e-5fdd-b105-ffc91e053289"
+version = "1.3.0"
+
 [[deps.Vulkan_Loader_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Wayland_jll", "Xorg_libX11_jll", "Xorg_libXrandr_jll", "xkbcommon_jll"]
 git-tree-sha1 = "2f0486047a07670caad3a81a075d2e518acc5c59"
@@ -3073,6 +3083,18 @@ git-tree-sha1 = "a63799ff68005991f9d9491b6e95bd3478d783cb"
 uuid = "c5fb5394-a638-5e4d-96e5-b29de1b5cf10"
 version = "1.6.0+0"
 
+[[deps.ZMQ]]
+deps = ["FileWatching", "PrecompileTools", "Printf", "Sockets", "ZeroMQ_jll"]
+git-tree-sha1 = "5f1c7008e2258c61af0eafef8c1f536b9fffbbd2"
+uuid = "c2297ded-f4af-51ae-bb23-16f91089e4e1"
+version = "1.5.1"
+
+[[deps.ZeroMQ_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "libsodium_jll"]
+git-tree-sha1 = "766d90db2817565b667c1cc9cc420d668f2e8dba"
+uuid = "8f1865be-045e-5c20-9c9f-bfbfb0764568"
+version = "4.3.6+0"
+
 [[deps.ZipArchives]]
 deps = ["ArgCheck", "CodecInflate64", "CodecZlib", "InputBuffers", "PrecompileTools", "TranscodingStreams", "Zlib_jll"]
 git-tree-sha1 = "83f728ecb873c58b794964f8b4bed811814d4b0d"
@@ -3166,6 +3188,12 @@ deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "Libdl", "libpng_jll"]
 git-tree-sha1 = "c1733e347283df07689d71d61e14be986e49e47a"
 uuid = "075b6546-f08a-558a-be8f-8157d0f608a5"
 version = "1.10.5+0"
+
+[[deps.libsodium_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "011b0a7331b41c25524b64dc42afc9683ee89026"
+uuid = "a9144af2-ca23-56d9-984f-0d03f7b5ccf8"
+version = "1.0.21+0"
 
 [[deps.libvorbis_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Ogg_jll"]
